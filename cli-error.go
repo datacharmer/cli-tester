@@ -60,4 +60,3 @@ func (cre *CliRunError) FullError() string {
 	}
 	return message
 }
-

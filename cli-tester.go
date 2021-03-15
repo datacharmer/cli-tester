@@ -2,6 +2,7 @@ package cli_tester
 
 import (
 	"fmt"
+	"log"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -23,11 +24,12 @@ type CliSet struct {
 
 // CliTest is the full test to be executed
 type CliTest struct {
-	Executable     string    // The name of the executable to run
-	Version        string    // Version of the executable
-	VersionCommand string    // The command to run to get the version
-	StopOnError    bool      // Halt the execution if one of the sets fails
-	Sets           []*CliSet // The tests to run
+	Executable     string      // The name of the executable to run
+	Version        string      // Version of the executable
+	VersionCommand string      // The command to run to get the version
+	StopOnError    bool        // Halt the execution if one of the sets fails
+	Sets           []*CliSet   // The tests to run
+	Logger         *log.Logger // If defined, enables logging
 }
 
 // Validate will make sure that a CliTest structure contains the necessary data
@@ -58,22 +60,30 @@ func (ct *CliTest) Validate() error {
 }
 
 // NewCliTest initializes a new CliTest
-func NewCliTest(executable, version, versionCommand string, stopOnError bool) *CliTest {
+func NewCliTest(executable, version, versionCommand string, stopOnError bool, logger *log.Logger) *CliTest {
 	return &CliTest{
 		Executable:     executable,
 		Version:        version,
 		VersionCommand: versionCommand,
 		StopOnError:    stopOnError,
 		Sets:           nil,
+		Logger:         logger,
 	}
 }
 
+func (ct *CliTest) Logf(format string, v ...interface{}) {
+	if ct.Logger == nil {
+		return
+	}
+	ct.Logger.Printf(format, v...)
+}
+
 // Add adds a new set to the CLI test
-func (ct *CliTest) Add(cliSet *CliSet, expected string) error {
-	if expected != "" {
-		re, err := regexp.Compile(expected)
+func (ct *CliTest) Add(cliSet *CliSet, expectedRegexp string) error {
+	if expectedRegexp != "" {
+		re, err := regexp.Compile(expectedRegexp)
 		if err != nil {
-			return SetCliRunError(cliSet, "error compiling regex '%s': %s", expected, err)
+			return SetCliRunError(cliSet, "error compiling regex '%s': %s", expectedRegexp, err)
 		}
 		cliSet.ExpectedRegexp = re
 	}
@@ -84,17 +94,23 @@ func (ct *CliTest) Add(cliSet *CliSet, expected string) error {
 		return SetCliRunError(cliSet, "[CliTest.Add] missing 'Command' component ")
 	}
 	ct.Sets = append(ct.Sets, cliSet)
+	ct.Logf("Added command %s", cliSet.Command)
 	return nil
 }
 
 // RunSet runs a specific set
 func (ct *CliTest) RunSet(cliSet *CliSet) *CliRunError {
+	ct.Logf("Running command '%s': %s", cliSet.Name, cliSet.Command)
 	stdOut, errOut, err := runCmdCtrlArgs(cliSet.Command.Command, cliSet.Command.Args...)
 	cliSet.Command.StdOut = stdOut
 	cliSet.Command.ErrOut = errOut
 	if err != nil {
+		ct.Logf("[RunSet] execution error %s", err)
+		ct.Logf("[RunSet] stdOut <%s>", stdOut)
+		ct.Logf("[RunSet] errOut <%s>", errOut)
 		return SetCliRunError(cliSet, "[RunSet] execution error %s", err)
 	}
+	ct.Logf("[RunSet] execution concluded without errors")
 	return nil
 }
 
@@ -113,15 +129,24 @@ func (ct *CliTest) Run() []*CliRunError {
 			errors = append(errors, err)
 			failed = true
 		}
+		if set.ExactExpected != "" && !failed {
+			if set.ExactExpected != set.Command.StdOut {
+				ct.Logf("[CliTest.Run] error matching exact value. Wanted '%s', got '%s'", set.ExactExpected, set.Command.StdOut)
+				errors = append(errors, SetCliRunError(set, "[CliTest.Run] error matching exact value. Wanted '%s', got '%s'", set.ExactExpected, set.Command.StdOut))
+				failed = true
+			}
+		}
 		if set.ExpectedRegexp != nil && !failed {
 			if !set.ExpectedRegexp.MatchString(set.Command.StdOut) {
-				errors = append(errors, SetCliRunError(set, "error matching expected '%s'", set.ExpectedRegexp.String()))
+				ct.Logf("[CliTest.Run] error matching expected '%s'", set.ExpectedRegexp.String())
+				errors = append(errors, SetCliRunError(set, "[CliTest.Run] error matching expected '%s'", set.ExpectedRegexp.String()))
 				failed = true
 			}
 		}
 		if set.ExpectedFunc != nil && !failed {
 			err := set.ExpectedFunc(set.Command.StdOut, set.Command.ErrOut)
 			if err != nil {
+				ct.Logf("[CliTest.Run] error matching expected func '%s'", err)
 				errors = append(errors, SetCliRunError(set, "error matching expected func: %s", err))
 				failed = true
 			}

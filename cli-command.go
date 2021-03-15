@@ -60,5 +60,5 @@ func runCmdCtrlArgs(c string, args ...string) (string, string, error) {
 	slurpOut, _ := io.ReadAll(stdout)
 	err = cmd.Wait()
 
-	return string(slurpOut), string(slurpErr), err
+	return strings.TrimSpace(string(slurpOut)), strings.TrimSpace(string(slurpErr)), err
 }

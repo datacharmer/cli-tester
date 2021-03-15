@@ -32,9 +32,15 @@ func NewCommandSet(args ...string) CommandSet {
 	}
 }
 
+func (cs CommandSet) String() string {
+	if len(cs.Args) > 0 {
+		return fmt.Sprintf("%s %s", cs.Command, strings.Join(cs.Args, " "))
+	}
+	return cs.Command
+}
+
 // runCmdCtrlArgs executes a command, returning stdOut, stdErr, and error
 func runCmdCtrlArgs(c string, args ...string) (string, string, error) {
-	fmt.Printf("%s %v\n", c, args)
 	cmd := exec.Command(c, args...) // #nosec G204
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
